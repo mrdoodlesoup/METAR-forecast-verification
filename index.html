@@ -1,0 +1,1164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>METAR Forecast Tool</title>
+    
+    <!-- PWA FIX: Using the full, explicit path to the manifest file -->
+    <link rel="manifest" href="/METAR-forecast-verification/manifest.json">
+    <meta name="theme-color" content="#06b6d4"/>
+    <link rel="apple-touch-icon" href="https://placehold.co/192x192/06b6d4/ffffff?text=METAR">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom/dist/chartjs-plugin-zoom.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        #meteogram-chart {
+            touch-action: none; 
+        }
+        .card {
+            background-color: #1f2937; /* gray-800 */
+            border: 1px solid #374151; /* gray-700 */
+            border-radius: 0.75rem; /* rounded-xl */
+            padding: 1.5rem; /* p-6 */
+            transition: all 0.3s ease-in-out;
+        }
+        .card-title {
+            color: #9ca3af; /* gray-400 */
+            font-size: 0.875rem; /* text-sm */
+            font-weight: 500; /* font-medium */
+        }
+        .card-value {
+            color: #f9fafb; /* gray-50 */
+            font-size: 1.875rem; /* text-3xl */
+            font-weight: 700; /* font-bold */
+            margin-top: 0.25rem; /* mt-1 */
+        }
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            font-size: 0.875rem;
+            font-weight: 600;
+            border-radius: 9999px;
+        }
+        .badge-vfr { background-color: #10b981; color: white; } /* emerald-500 */
+        .badge-mvfr { background-color: #3b82f6; color: white; } /* blue-500 */
+        .badge-ifr { background-color: #ef4444; color: white; } /* red-500 */
+        .badge-lifr { background-color: #a855f7; color: white; } /* purple-500 */
+        
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .clickable-row:hover {
+            background-color: #374151; /* gray-700 */
+            cursor: pointer;
+        }
+        .analysis-input {
+             width: 6rem;
+             background-color: #374151;
+             border: 1px solid #4b5563;
+             border-radius: 0.375rem;
+             box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+             color: white;
+             text-align: center;
+        }
+        .analysis-input:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.4);
+        }
+        .tab-button {
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .tab-button.active {
+            border-color: #06b6d4; /* cyan-500 */
+            color: #06b6d4;
+            font-weight: 600;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200 p-2 sm:p-4">
+
+    <div id="app" class="w-full max-w-5xl mx-auto">
+        
+        <!-- Header -->
+        <header class="text-center mb-6">
+            <h1 id="main-title" class="text-3xl sm:text-4xl font-bold text-white">METAR Forecast Tool</h1>
+            <p id="main-subtitle" class="text-gray-400 mt-1">Live Weather Data from the National Weather Service</p>
+        </header>
+
+        <!-- Station Selector -->
+        <div class="card mb-8">
+             <form id="station-form" class="flex flex-col sm:flex-row items-center gap-4">
+                 <label for="station-input" class="sm:flex-shrink-0 text-lg font-medium text-gray-300">ICAO Station:</label>
+                 <input type="text" id="station-input" value="KSAV" maxlength="4" class="flex-grow w-full sm:w-auto bg-gray-700 border-gray-600 rounded-md shadow-sm text-white focus:ring-cyan-500 focus:border-cyan-500 uppercase" placeholder="e.g., KLAX">
+                 <button type="submit" class="w-full sm:w-auto bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded-lg transition">Load Station</button>
+             </form>
+             <p id="station-error" class="text-red-400 text-center mt-2 hidden"></p>
+        </div>
+
+        <!-- Prediction Input -->
+        <div id="prediction-section" class="card mb-8">
+            <h3 class="text-2xl font-bold text-white mb-4 text-center">Enter Your Forecast</h3>
+            <form id="prediction-form" class="grid grid-cols-1 md:grid-cols-6 gap-4">
+                <div class="md:col-span-3">
+                    <label for="forecast-date" class="block text-sm font-medium text-gray-400">Forecast Valid Date</label>
+                    <input type="date" id="forecast-date" class="mt-1 block w-full bg-gray-700 border-gray-600 rounded-md shadow-sm text-white focus:ring-cyan-500 focus:border-cyan-500" required>
+                </div>
+                <div class="md:col-span-3">
+                    <label for="forecast-timeframe" class="block text-sm font-medium text-gray-400">Timeframe (UTC)</label>
+                    <select id="forecast-timeframe" class="mt-1 block w-full bg-gray-700 border-gray-600 rounded-md shadow-sm text-white focus:ring-cyan-500 focus:border-cyan-500">
+                        <option value="00">00z - 00z</option>
+                        <option value="06" selected>06z - 06z</option>
+                        <option value="12">12z - 12z</option>
+                        <option value="18">18z - 18z</option>
+                    </select>
+                </div>
+                <div class="col-span-1 md:col-span-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                        <label for="high-temp" class="block text-sm font-medium text-gray-400">High Temp (°F)</label>
+                        <input type="number" step="0.1" id="high-temp" class="mt-1 block w-full bg-gray-700 border-gray-600 rounded-md shadow-sm text-white focus:ring-cyan-500 focus:border-cyan-500" required>
+                    </div>
+                    <div>
+                        <label for="low-temp" class="block text-sm font-medium text-gray-400">Low Temp (°F)</label>
+                        <input type="number" step="0.1" id="low-temp" class="mt-1 block w-full bg-gray-700 border-gray-600 rounded-md shadow-sm text-white focus:ring-cyan-500 focus:border-cyan-500" required>
+                    </div>
+                    <div>
+                        <label for="max-wind" class="block text-sm font-medium text-gray-400">Max Wind (KT)</label>
+                        <input type="number" id="max-wind" class="mt-1 block w-full bg-gray-700 border-gray-600 rounded-md shadow-sm text-white focus:ring-cyan-500 focus:border-cyan-500" required>
+                    </div>
+                    <div>
+                        <label for="precip" class="block text-sm font-medium text-gray-400">Precip (in)</label>
+                        <input type="number" step="0.01" id="precip" class="mt-1 block w-full bg-gray-700 border-gray-600 rounded-md shadow-sm text-white focus:ring-cyan-500 focus:border-cyan-500" required>
+                    </div>
+                </div>
+                <div class="col-span-1 md:col-span-6 mt-2">
+                    <button type="submit" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded-lg transition">
+                        <span id="analyze-btn-text">Verify Forecast</span>
+                        <svg id="analyze-btn-spinner" class="animate-spin h-5 w-5 text-white mx-auto hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Prediction Results -->
+        <div id="prediction-results" class="hidden card mb-8">
+            <h3 class="text-2xl font-bold text-white mb-4 text-center">Forecast Analysis</h3>
+            <div id="analysis-period" class="text-center text-gray-400 mb-4"></div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                <!-- Headers -->
+                <div></div>
+                <div class="font-bold text-gray-300">Your Guess</div>
+                <div class="font-bold text-gray-300">Actual</div>
+                <div class="font-bold text-gray-300">Difference</div>
+                <!-- High Temp -->
+                <div class="text-left font-semibold">High Temp (°F)</div>
+                <div id="res-high-temp-guess"></div>
+                <div id="res-high-temp-actual"></div>
+                <div id="res-high-temp-diff"></div>
+                <!-- Low Temp -->
+                <div class="text-left font-semibold">Low Temp (°F)</div>
+                <div id="res-low-temp-guess"></div>
+                <div id="res-low-temp-actual"></div>
+                <div id="res-low-temp-diff"></div>
+                <!-- Max Wind -->
+                <div class="text-left font-semibold">Max Sustained Wind (KT)</div>
+                <div id="res-max-wind-guess"></div>
+                <div id="res-max-wind-actual"></div>
+                <div id="res-max-wind-diff"></div>
+                <!-- Precipitation -->
+                <div class="text-left font-semibold">Precipitation (in)</div>
+                <div id="res-precip-guess"></div>
+                <div id="res-precip-actual"></div>
+                <div id="res-precip-diff"></div>
+            </div>
+            <div class="mt-6 text-center border-t border-gray-700 pt-4">
+                <h4 class="text-lg font-medium text-gray-400">Projected Raw Score (Lower is Better)</h4>
+                <p id="live-score-display" class="text-3xl font-bold text-cyan-400">-</p>
+            </div>
+            <div class="mt-4 text-center">
+                <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+                    <button id="save-journal-btn" class="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition">Save to Journal</button>
+                    <a href="https://forecast.weather.gov/product_sites.php?site=NWS&product=CLI" target="_blank" class="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">Check CLI</a>
+                </div>
+                 <p id="save-success-msg" class="text-emerald-400 text-sm mt-2 hidden">Forecast saved!</p>
+            </div>
+             <div id="analysis-note" class="mt-6 p-3 bg-gray-700/50 border border-cyan-500/30 rounded-lg text-center">
+                 <p class="font-semibold text-gray-200">How to find Max Sustained Wind:</p>
+                 <p class="text-sm text-gray-300 mt-1">
+                     Click the <strong class="text-cyan-400">"Check CLI"</strong> link. On the new page, press <kbd class="px-2 py-1 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-300 rounded-md">Ctrl+F</kbd> (or <kbd class="px-2 py-1 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-300 rounded-md">Cmd+F</kbd>) and search for <strong id="cli-search-id" class="text-cyan-400">SAV</strong> to find the report.
+                 </p>
+             </div>
+        </div>
+
+        <!-- Loading State -->
+        <div id="loading" class="text-center py-12">
+            <svg class="animate-spin h-8 w-8 text-white mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <p id="loading-text" class="mt-4 text-gray-400">Fetching latest METAR data for KSAV...</p>
+        </div>
+        
+        <!-- Tab Navigation -->
+        <div id="tabs" class="hidden mb-4">
+            <div class="flex border-b border-gray-700 text-gray-400">
+                <button data-tab="live" class="tab-button active">Live Data</button>
+                <button data-tab="meteogram" class="tab-button">Meteogram</button>
+                <button data-tab="journal" class="tab-button">Journal</button>
+            </div>
+        </div>
+
+        <!-- METAR Data Display -->
+        <main id="metar-data" class="hidden">
+            <div id="tab-content-live" class="tab-content active">
+                <h3 id="observation-title" class="text-2xl font-bold text-white mb-4 text-center">Latest Observation</h3>
+                <button id="show-latest-btn" class="hidden w-full max-w-xs mx-auto bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition mb-4">View Latest Observation</button>
+                
+                <!-- Raw METAR String -->
+                <div class="card mb-6 text-center">
+                    <p id="raw-metar" class="text-lg font-mono text-cyan-400"></p>
+                </div>
+
+                <!-- Decoded Data Grid -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                    <!-- Cards here -->
+                    <div class="card"><h2 class="card-title">Flight Rules</h2><p id="flight-category" class="card-value">-</p></div>
+                    <div class="card"><h2 class="card-title">Altimeter (A Group)</h2><p class="card-value"><span id="altimeter">-</span> <span class="text-lg font-medium text-gray-400">inHg</span></p></div>
+                    <div class="card"><h2 class="card-title">Temperature (T Group)</h2><p class="card-value"><span id="temperature">-</span><span class="text-lg font-medium text-gray-400">°F</span></p></div>
+                    <div class="card"><h2 class="card-title">Dewpoint (T Group)</h2><p class="card-value"><span id="dewpoint">-</span><span class="text-lg font-medium text-gray-400">°F</span></p></div>
+                    <div class="card"><h2 class="card-title">Visibility (Vis. Group)</h2><p class="card-value"><span id="visibility">-</span> <span class="text-lg font-medium text-gray-400">SM</span></p></div>
+                    <div class="card col-span-1 sm:col-span-2 lg:col-span-2"><h2 class="card-title">Wind (Wind Group)</h2><p class="card-value"><span id="wind">-</span></p></div>
+                    <div class="card col-span-1 sm:col-span-2 lg:col-span-3"><h2 class="card-title">Pressure Tendency (5 Group)</h2><p id="five-group" class="card-value text-lg sm:text-xl">-</p></div>
+                    <div class="card"><h2 class="card-title">Hourly Precip (P Group)</h2><p class="card-value"><span id="p-group">-</span> <span class="text-lg font-medium text-gray-400">in</span></p></div>
+                    <div class="card"><h2 class="card-title">3/6-Hour Precip (6 Group)</h2><p class="card-value"><span id="six-group">-</span> <span class="text-lg font-medium text-gray-400">in</span></p></div>
+                    <div class="card"><h2 class="card-title">24-Hour Precip (7 Group)</h2><p class="card-value"><span id="seven-group">-</span> <span class="text-lg font-medium text-gray-400">in</span></p></div>
+                    <div class="card"><h2 class="card-title">6-hr Max Temp (1 Group)</h2><p class="card-value"><span id="one-group">-</span> <span class="text-lg font-medium text-gray-400">°F</span></p></div>
+                    <div class="card"><h2 class="card-title">6-hr Min Temp (2 Group)</h2><p class="card-value"><span id="two-group">-</span> <span class="text-lg font-medium text-gray-400">°F</span></p></div>
+                    <div class="card col-span-1 sm:col-span-2 lg:col-span-3"><h2 class="card-title">Sky Condition (Sky Group)</h2><div id="sky-condition" class="mt-2 text-lg text-gray-100 space-y-1"><p>-</p></div></div>
+                </div>
+
+                <!-- History -->
+                <div id="history-container" class="mt-8">
+                    <h3 class="text-2xl font-bold text-white mb-4">Recent History (Last 24 Hours)</h3>
+                    <div class="card overflow-x-auto">
+                        <table class="w-full text-left min-w-full">
+                            <thead class="text-gray-400 border-b border-gray-700">
+                                <tr>
+                                    <th class="p-2 font-semibold">Observation Time</th>
+                                    <th class="p-2 font-semibold">Raw METAR</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-content-meteogram" class="tab-content">
+                <!-- Meteogram -->
+                <div id="meteogram-container" class="mt-8">
+                    <h3 class="text-2xl font-bold text-white mb-4">24-Hour Meteogram</h3>
+                    <div class="card">
+                        <canvas id="meteogram-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-content-journal" class="tab-content">
+                 <!-- Journal -->
+                <div id="journal-section" class="mt-8">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-2xl font-bold text-white">Forecast Journal</h3>
+                         <div class="text-right">
+                             <h4 class="text-sm text-gray-400">Cumulative Average Score</h4>
+                             <p id="average-score" class="text-2xl font-bold text-cyan-400">-</p>
+                         </div>
+                        <button id="clear-journal-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition text-sm">Clear Journal</button>
+                    </div>
+                    <div class="card overflow-x-auto">
+                        <table class="w-full text-left min-w-full">
+                            <thead class="text-gray-400 border-b border-gray-700 text-sm">
+                                <tr>
+                                    <th class="p-2 font-semibold">Station</th>
+                                    <th class="p-2 font-semibold">Date (UTC)</th>
+                                    <th class="p-2 font-semibold">High °F (Forecast/Observed)</th>
+                                    <th class="p-2 font-semibold">Low °F (Forecast/Observed)</th>
+                                    <th class="p-2 font-semibold">Wind KT (Forecast/Observed)</th>
+                                    <th class="p-2 font-semibold">Precip in (Forecast/Observed)</th>
+                                    <th class="p-2 font-semibold">Score</th>
+                                </tr>
+                            </thead>
+                            <tbody id="journal-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Timestamp -->
+            <footer class="text-center mt-8 text-gray-500 text-sm">
+                <p>Last Updated: <span id="last-updated" class="font-medium"></span></p>
+                <p class="mt-1">Data refreshes automatically every 5 minutes.</p>
+                <p class="mt-4 text-xs text-gray-600">Weather data provided by the U.S. National Weather Service</p>
+                <p class="mt-1 text-xs text-gray-600">Concept by Michael Dooley III | Created with Google Gemini</p>
+            </footer>
+        </main>
+        
+    </div>
+
+    <script>
+        let currentStation = 'KSAV';
+        let refreshInterval;
+        let lastAnalysisData = null;
+        let meteogramChart = null;
+
+        // --- DOM Elements ---
+        const loadingEl = document.getElementById('loading');
+        const loadingTextEl = document.getElementById('loading-text');
+        const metarDataEl = document.getElementById('metar-data');
+        const predictionForm = document.getElementById('prediction-form');
+        const stationForm = document.getElementById('station-form');
+        const stationInput = document.getElementById('station-input');
+        const stationErrorEl = document.getElementById('station-error');
+        const mainTitleEl = document.getElementById('main-title');
+        const mainSubtitleEl = document.getElementById('main-subtitle');
+        const cliSearchIdEl = document.getElementById('cli-search-id');
+
+        const predictionResultsEl = document.getElementById('prediction-results');
+        const showLatestBtn = document.getElementById('show-latest-btn');
+        const observationTitleEl = document.getElementById('observation-title');
+        const forecastDateInput = document.getElementById('forecast-date');
+        
+        const saveJournalBtn = document.getElementById('save-journal-btn');
+        const saveSuccessMsg = document.getElementById('save-success-msg');
+        const clearJournalBtn = document.getElementById('clear-journal-btn');
+        const journalTableBody = document.getElementById('journal-table-body');
+        const averageScoreEl = document.getElementById('average-score');
+        const liveScoreDisplay = document.getElementById('live-score-display');
+        
+        const tabsContainer = document.getElementById('tabs');
+
+        let historicalMetars = [];
+        let latestMetarObservation = null;
+
+        const flightCategoryMapping = {
+            'VFR': 'badge-vfr',
+            'MVFR': 'badge-mvfr',
+            'IFR': 'badge-ifr',
+            'LIFR': 'badge-lifr',
+        };
+
+        function setDefaultForecastDate() {
+            const now = new Date();
+            const utcHour = now.getUTCHours();
+            
+            if (utcHour < 6) {
+                now.setUTCDate(now.getUTCDate() - 2);
+            } else {
+                now.setUTCDate(now.getUTCDate() - 1);
+            }
+            
+            forecastDateInput.value = now.toISOString().split('T')[0];
+        }
+
+        async function fetchStationData(stationID) {
+            loadingEl.style.display = 'block';
+            loadingTextEl.textContent = `Fetching latest METAR data for ${stationID}...`;
+            metarDataEl.classList.add('hidden');
+            tabsContainer.classList.add('hidden');
+            predictionResultsEl.classList.add('hidden');
+            stationErrorEl.classList.add('hidden');
+            
+            const LATEST_API_URL = `https://api.weather.gov/stations/${stationID}/observations/latest`;
+            const oneDayAgo = new Date();
+            oneDayAgo.setHours(oneDayAgo.getHours() - 24);
+            const startTime = oneDayAgo.toISOString();
+            const HISTORY_API_URL = `https://api.weather.gov/stations/${stationID}/observations?start=${startTime}`;
+            const STATION_DETAILS_URL = `https://api.weather.gov/stations/${stationID}`;
+
+            try {
+                const [latestResponse, historyResponse, detailsResponse] = await Promise.all([
+                    fetch(LATEST_API_URL),
+                    fetch(HISTORY_API_URL),
+                    fetch(STATION_DETAILS_URL)
+                ]);
+
+                if (!detailsResponse.ok) {
+                    if (detailsResponse.status === 404) {
+                        throw new Error(`Station '${stationID}' not found.`);
+                    }
+                    throw new Error(`Failed to fetch station details: ${detailsResponse.statusText}`);
+                }
+                const stationDetails = await detailsResponse.json();
+                updateHeader(stationID, stationDetails.properties.name);
+
+                if (!latestResponse.ok) throw new Error(`Latest data fetch failed: ${latestResponse.statusText}`);
+                if (!historyResponse.ok) throw new Error(`History data fetch failed: ${historyResponse.statusText}`);
+
+                const latestData = await latestResponse.json();
+                const historyData = await historyResponse.json();
+
+                if (latestData.properties) {
+                    latestMetarObservation = latestData.properties;
+                    updateUI(latestMetarObservation, true);
+                } else {
+                     throw new Error("Latest data format is incorrect.");
+                }
+                
+                if (historyData.features && historyData.features.length > 0) {
+                    historicalMetars = historyData.features
+                        .map(f => f.properties)
+                        .filter(metar => metar.rawMessage);
+                    updateHistoryTable(historicalMetars);
+                    renderMeteogram(historicalMetars);
+                } else {
+                    console.warn('No historical METAR data available.');
+                    document.getElementById('history-table-body').innerHTML = '<tr><td colspan="2" class="p-4 text-center">No recent history found for this station.</td></tr>';
+                    if (meteogramChart) meteogramChart.destroy();
+                }
+
+            } catch (error) {
+                console.error("Failed to fetch METAR data:", error);
+                loadingEl.style.display = 'none';
+                stationErrorEl.textContent = error.message;
+                stationErrorEl.classList.remove('hidden');
+            }
+        }
+        
+        function updateHeader(stationID, stationName) {
+            mainTitleEl.textContent = `${stationID} METAR Forecast Tool`;
+            mainSubtitleEl.textContent = `Live Weather Data for ${stationName}`;
+            cliSearchIdEl.textContent = stationID.startsWith('K') ? stationID.substring(1) : stationID;
+        }
+
+        // --- All parsing functions remain the same ---
+        function parsePressureTendency(rawMessage) {
+            const tendencyRegex = /\s5(\d)(\d{3})/;
+            const match = rawMessage.match(tendencyRegex);
+            if (!match) return null;
+
+            const code = parseInt(match[1], 10);
+            const amountHpa = parseInt(match[2], 10) / 10.0;
+            const amountInHg = (amountHpa * 0.02953).toFixed(2);
+
+            let description = '';
+            switch (code) {
+                case 0: description = 'Rising, then falling'; break;
+                case 1: description = 'Rising, then steady'; break;
+                case 2: description = 'Steadily rising'; break;
+                case 3: description = 'Falling or steady, then rising'; break;
+                case 4: description = 'Steady'; break;
+                case 5: description = 'Falling, then rising'; break;
+                case 6: description = 'Falling, then steady'; break;
+                case 7: description = 'Steadily falling'; break;
+                case 8: description = 'Steady or rising, then falling'; break;
+                default: description = 'Unknown';
+            }
+            
+            let sign = '';
+            if ([0, 1, 2, 3].includes(code)) {
+                sign = '+';
+            } else if ([5, 6, 7, 8].includes(code)) {
+                 sign = '-';
+            }
+            
+            return `${description}, ${sign}${amountInHg} inHg`;
+        }
+
+        function parsePrecipGroup(rawMessage, groupPrefix) {
+            const regex = new RegExp(`\\s${groupPrefix}(\\d{4})`);
+            const match = rawMessage.match(regex);
+            if (match && match[1]) {
+                return (parseInt(match[1], 10) / 100.0).toFixed(2);
+            }
+            return null;
+        }
+
+        function parseTempFromRaw(rawMessage) {
+            const tempRegex = /\sT(\d)(\d{3})(\d)(\d{3})/;
+            const match = rawMessage.match(tempRegex);
+            if (match) {
+                const tempSign = match[1] === '1' ? -1 : 1;
+                const tempC = (parseInt(match[2], 10) / 10) * tempSign;
+                const tempF = (tempC * 9/5 + 32).toFixed(1);
+
+                const dewSign = match[3] === '1' ? -1 : 1;
+                const dewC = (parseInt(match[4], 10) / 10) * dewSign;
+                const dewF = (dewC * 9/5 + 32).toFixed(1);
+
+                return { tempF, dewF };
+            }
+            return { tempF: null, dewF: null };
+        }
+        
+        function parseOneTwoGroup(rawMessage, groupPrefix) {
+             const regex = new RegExp(`\\s${groupPrefix}(\\d)(\\d{3})`);
+             const match = rawMessage.match(regex);
+             if(match) {
+                 const sign = match[1] === '1' ? -1 : 1;
+                 const tempC = (parseInt(match[2], 10) / 10) * sign;
+                 return (tempC * 9/5 + 32).toFixed(1);
+             }
+             return null;
+        }
+
+        function parseWindFromRaw(rawMessage) {
+            const windRegex = /(VRB|\d{3})(\d{2,3})G?(\d{2,3})?KT/;
+            const match = rawMessage.match(windRegex);
+            if (match) {
+                const dir = match[1];
+                const speed = parseInt(match[2], 10);
+                const gust = match[3] ? parseInt(match[3], 10) : null;
+                let windText = `${dir}° at ${speed} KT`;
+                if(gust) {
+                    windText += ` (Gusts ${gust} KT)`;
+                }
+                return { text: windText, speed, gust, direction: dir };
+            }
+            return { text: 'Calm', speed: 0, gust: 0, direction: '000' };
+        }
+        
+        function parseSkyConditionsFromRaw(rawMessage) {
+            const layers = [];
+            const skyRegex = /(FEW|SCT|BKN|OVC|VV)(\d{3})/g;
+            let match;
+            while ((match = skyRegex.exec(rawMessage)) !== null) {
+                const coverage = match[1];
+                const altitude = parseInt(match[2], 10) * 100;
+                layers.push(`${coverage} at ${altitude.toLocaleString()} ft AGL`);
+            }
+            return layers;
+        }
+
+        function updateUI(data, isLatest = false) {
+            loadingEl.style.display = 'none';
+            metarDataEl.classList.remove('hidden');
+            tabsContainer.classList.remove('hidden');
+            
+            const obsTime = new Date(data.timestamp);
+            const zuluHour = obsTime.getUTCHours().toString().padStart(2, '0');
+            const zuluMinutes = obsTime.getUTCMinutes().toString().padStart(2, '0');
+            const zuluTimeStr = `${zuluHour}${zuluMinutes}Z`;
+
+            if (isLatest) {
+                observationTitleEl.textContent = `Latest Observation (${zuluTimeStr})`;
+                showLatestBtn.classList.add('hidden');
+            } else {
+                observationTitleEl.textContent = `Historical Observation for ${obsTime.toLocaleString()} (${zuluTimeStr})`;
+                showLatestBtn.classList.remove('hidden');
+            }
+            
+            const rawMessage = data.rawMessage || '';
+            document.getElementById('raw-metar').textContent = rawMessage;
+
+            const flightCatEl = document.getElementById('flight-category');
+            flightCatEl.textContent = data.flightRules || 'N/A';
+            flightCatEl.className = 'card-value'; 
+            if (data.flightRules && flightCategoryMapping[data.flightRules]) {
+                flightCatEl.classList.add('badge', flightCategoryMapping[data.flightRules]);
+            }
+            
+            const altimInHg = data.barometricPressure.value ? (data.barometricPressure.value / 3386.39).toFixed(2) : '-';
+            document.getElementById('altimeter').textContent = altimInHg;
+            
+            const { tempF, dewF } = parseTempFromRaw(rawMessage);
+            document.getElementById('temperature').textContent = tempF || (data.temperature.value !== null ? Math.round(data.temperature.value * 9/5 + 32) : '-');
+            document.getElementById('dewpoint').textContent = dewF || (data.dewpoint.value !== null ? Math.round(data.dewpoint.value * 9/5 + 32) : '-');
+
+            const windInfo = parseWindFromRaw(rawMessage);
+            document.getElementById('wind').textContent = windInfo.text;
+            
+            const visibilitySM = data.visibility.value ? (data.visibility.value / 1609.34).toFixed(1) : '-';
+            document.getElementById('visibility').textContent = visibilitySM.replace('.0', '');
+            
+            const fiveGroupValue = parsePressureTendency(rawMessage);
+            document.getElementById('five-group').textContent = fiveGroupValue !== null ? fiveGroupValue : 'None';
+
+            const pGroupValue = parsePrecipGroup(rawMessage, 'P');
+            document.getElementById('p-group').textContent = pGroupValue !== null ? pGroupValue : 'None';
+            
+            const sixGroupValue = parsePrecipGroup(rawMessage, '6');
+            document.getElementById('six-group').textContent = sixGroupValue !== null ? sixGroupValue : 'None';
+
+            const sevenGroupValue = parsePrecipGroup(rawMessage, '7');
+            document.getElementById('seven-group').textContent = sevenGroupValue !== null ? sevenGroupValue : 'None';
+            
+            const oneGroupValue = parseOneTwoGroup(rawMessage, '1');
+            document.getElementById('one-group').textContent = oneGroupValue !== null ? oneGroupValue : 'None';
+            const twoGroupValue = parseOneTwoGroup(rawMessage, '2');
+            document.getElementById('two-group').textContent = twoGroupValue !== null ? twoGroupValue : 'None';
+
+            const skyEl = document.getElementById('sky-condition');
+            skyEl.innerHTML = '';
+            const skyLayers = parseSkyConditionsFromRaw(rawMessage);
+
+            if (skyLayers.length > 0) {
+                skyLayers.forEach(layerText => {
+                    const p = document.createElement('p');
+                    p.textContent = layerText;
+                    skyEl.appendChild(p);
+                });
+            } else {
+                skyEl.innerHTML = '<p>Clear</p>';
+            }
+            
+            const lastUpdatedTime = new Date(data.timestamp);
+            document.getElementById('last-updated').textContent = `${lastUpdatedTime.toLocaleString()} (${zuluTimeStr})`;
+        }
+
+        function updateHistoryTable(allMetars) {
+            const historyBody = document.getElementById('history-table-body');
+            historyBody.innerHTML = ''; 
+
+            allMetars.forEach(metar => {
+                const row = document.createElement('tr');
+                row.className = 'border-b border-gray-800 last:border-b-0 clickable-row';
+                row.addEventListener('click', () => {
+                    updateUI(metar, false);
+                    document.querySelector('.tab-button[data-tab="live"]').click();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                });
+
+                const timeCell = document.createElement('td');
+                timeCell.className = 'p-2 font-mono text-sm text-gray-300';
+                const obsTime = new Date(metar.timestamp);
+                timeCell.textContent = obsTime.toLocaleString();
+
+                const metarCell = document.createElement('td');
+                metarCell.className = 'p-2 font-mono text-cyan-400 text-sm';
+                metarCell.textContent = metar.rawMessage;
+
+                row.appendChild(timeCell);
+                row.appendChild(metarCell);
+                historyBody.appendChild(row);
+            });
+        }
+        
+        const windBarbPlugin = {
+            id: 'windBarbs',
+            afterDatasetsDraw(chart, args, options) {
+                const { ctx } = chart;
+                const windDirs = chart.config.data.windDirs;
+                const windSpeeds = chart.config.data.windSpeeds;
+                
+                if (!windDirs || !windSpeeds) return;
+
+                const meta = chart.getDatasetMeta(2); 
+
+                meta.data.forEach((element, index) => {
+                    const x = element.x;
+                    const y = chart.scales.x.bottom + 25;
+                    const speed = windSpeeds[index];
+                    const direction = windDirs[index];
+                    
+                    if (speed === null || direction === null) return;
+                    
+                    drawWindBarb(ctx, x, y, speed, direction);
+                });
+            }
+        };
+
+        function drawWindBarb(ctx, x, y, speed, direction) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate((direction) * Math.PI / 180);
+            
+            ctx.strokeStyle = "#eab308";
+            ctx.lineWidth = 1.5;
+
+            if (speed < 3) {
+                ctx.beginPath();
+                ctx.arc(0, 0, 5, 0, 2 * Math.PI);
+                ctx.stroke();
+                ctx.restore();
+                return;
+            }
+
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(0, -20);
+            
+            let remainingSpeed = speed;
+            let currentPos = -20;
+
+            while (remainingSpeed >= 50) {
+                ctx.moveTo(0, currentPos);
+                ctx.lineTo(-10, currentPos + 4);
+                ctx.lineTo(0, currentPos + 8);
+                ctx.closePath();
+                ctx.fillStyle = "#eab308";
+                ctx.fill();
+                currentPos += 8;
+                remainingSpeed -= 50;
+            }
+
+            while (remainingSpeed >= 10) {
+                ctx.moveTo(0, currentPos);
+                ctx.lineTo(-10, currentPos + 4);
+                currentPos += 4;
+                remainingSpeed -= 10;
+            }
+
+            if (remainingSpeed >= 5) {
+                ctx.moveTo(0, currentPos);
+                ctx.lineTo(-5, currentPos + 2);
+            }
+            
+            ctx.stroke();
+            ctx.restore();
+        }
+
+
+        function renderMeteogram(data) {
+            const ctx = document.getElementById('meteogram-chart').getContext('2d');
+            
+            const reversedData = [...data].reverse();
+
+            const labels = reversedData.map(m => {
+                const date = new Date(m.timestamp);
+                return `${date.getUTCHours().toString().padStart(2, '0')}:${date.getUTCMinutes().toString().padStart(2, '0')}Z`;
+            });
+            const temps = reversedData.map(m => parseFloat(parseTempFromRaw(m.rawMessage).tempF) || null);
+            const dewps = reversedData.map(m => parseFloat(parseTempFromRaw(m.rawMessage).dewF) || null);
+            const winds = reversedData.map(m => parseWindFromRaw(m.rawMessage).speed || 0);
+            const windDirs = reversedData.map(m => {
+                const dir = parseWindFromRaw(m.rawMessage).direction;
+                return dir === 'VRB' ? null : parseInt(dir);
+            });
+            const precip = reversedData.map(m => parseFloat(parsePrecipGroup(m.rawMessage, 'P')) || 0);
+
+            if (meteogramChart) {
+                meteogramChart.destroy();
+            }
+
+            meteogramChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { type: 'line', label: 'Temperature (°F)', data: temps, borderColor: '#f87171', backgroundColor: '#f87171', yAxisID: 'y-temp', tension: 0.1, },
+                        { type: 'line', label: 'Dewpoint (°F)', data: dewps, borderColor: '#60a5fa', backgroundColor: '#60a5fa', yAxisID: 'y-temp', tension: 0.1, },
+                        { type: 'bar', label: 'Wind Speed (KT)', data: winds, backgroundColor: 'rgba(56, 189, 248, 0.3)', borderColor: 'rgba(56, 189, 248, 0.5)', yAxisID: 'y-wind', },
+                        { type: 'bar', label: 'Precipitation (in)', data: precip, backgroundColor: 'rgba(74, 222, 128, 0.4)', borderColor: 'rgba(74, 222, 128, 0.6)', yAxisID: 'y-precip', }
+                    ],
+                    windDirs: windDirs,
+                    windSpeeds: winds,
+                },
+                plugins: [windBarbPlugin],
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                     layout: { padding: { bottom: 30 } },
+                    scales: {
+                        x: { ticks: { color: '#9ca3af' }, grid: { color: '#374151' } },
+                        'y-temp': { position: 'left', ticks: { color: '#9ca3af' }, grid: { color: '#374151' }, title: { display: true, text: 'Temperature (°F)', color: '#9ca3af' } },
+                        'y-wind': { position: 'right', ticks: { color: '#9ca3af', beginAtZero: true }, grid: { drawOnChartArea: false }, title: { display: true, text: 'Wind (KT)', color: '#9ca3af' } },
+                        'y-precip': { position: 'right', ticks: { color: '#9ca3af', beginAtZero: true }, grid: { drawOnChartArea: false }, title: { display: true, text: 'Precip (in)', color: '#9ca3af' } }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#d1d5db' } },
+                        tooltip: { mode: 'index', intersect: false, callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) { label += ': '; }
+                                if (context.dataset.label === 'Wind Speed (KT)') {
+                                    const windDir = windDirs[context.dataIndex];
+                                    label += `${windDir}° @ ${context.parsed.y} KT`;
+                                } else if (context.parsed.y !== null) {
+                                    label += context.parsed.y;
+                                }
+                                return label;
+                            }
+                        }},
+                        zoom: { pan: { enabled: true, mode: 'x' }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' } }
+                    },
+                    interaction: { mode: 'index', intersect: false }
+                }
+            });
+        }
+
+        async function fetchAndAnalyzeForecast(event) {
+            event.preventDefault();
+            const selectedDate = forecastDateInput.value;
+            if (!selectedDate) {
+                alert("Please select a valid forecast date.");
+                return;
+            }
+            
+            const startHour = document.getElementById('forecast-timeframe').value;
+
+            const btnText = document.getElementById('analyze-btn-text');
+            const btnSpinner = document.getElementById('analyze-btn-spinner');
+            btnText.classList.add('hidden');
+            btnSpinner.classList.remove('hidden');
+
+            const startDate = new Date(`${selectedDate}T${startHour}:00:00Z`);
+            const endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + 1);
+            
+            const forecastMetarApiUrl = `https://api.weather.gov/stations/${currentStation}/observations?start=${startDate.toISOString()}&end=${endDate.toISOString()}`;
+            
+            try {
+                const metarResponse = await fetch(forecastMetarApiUrl);
+                
+                if (!metarResponse.ok) throw new Error(`METAR data fetch failed from NWS archive: ${metarResponse.statusText}`);
+                const metarData = await metarResponse.json();
+
+                let forecastMetars = [];
+                if (metarData.features && metarData.features.length > 0) {
+                    forecastMetars = metarData.features.map(f => f.properties).filter(m => m.rawMessage);
+                } else {
+                     alert(`No data found in the NWS archive for the selected period. The archive may have gaps.`);
+                     predictionResultsEl.classList.add('hidden');
+                     return;
+                }
+                
+                runAnalysis(forecastMetars, startDate, endDate);
+
+            } catch (error) {
+                 console.error("Failed to fetch forecast data:", error);
+                 alert(`Failed to fetch forecast data: ${error.message}`);
+                 predictionResultsEl.classList.add('hidden');
+            } finally {
+                btnText.classList.remove('hidden');
+                btnSpinner.classList.add('hidden');
+            }
+        }
+
+        function runAnalysis(forecastData, startDate, endDate) {
+            document.getElementById('analysis-period').textContent = `Analysis for ${startDate.toUTCString()} to ${endDate.toUTCString()}`;
+
+            const guessHighTemp = parseFloat(document.getElementById('high-temp').value);
+            const guessLowTemp = parseFloat(document.getElementById('low-temp').value);
+            const guessMaxWind = parseFloat(document.getElementById('max-wind').value);
+            const guessPrecip = parseFloat(document.getElementById('precip').value);
+
+            let actualHighTemp = -Infinity;
+            let actualLowTemp = Infinity;
+            let actualTotalPrecip = 0;
+            
+            forecastData.forEach(metar => {
+                const rawMsg = metar.rawMessage;
+                const { tempF } = parseTempFromRaw(rawMsg);
+                const currentTempF = parseFloat(tempF);
+
+                if (!isNaN(currentTempF)) {
+                    if (currentTempF > actualHighTemp) actualHighTemp = currentTempF;
+                    if (currentTempF < actualLowTemp) actualLowTemp = currentTempF;
+                }
+                
+                const hourlyPrecip = parsePrecipGroup(rawMsg, 'P');
+                if (hourlyPrecip !== null) {
+                    actualTotalPrecip += parseFloat(hourlyPrecip);
+                }
+            });
+            
+            actualHighTemp = isFinite(actualHighTemp) ? Math.round(actualHighTemp) : "";
+            actualLowTemp = isFinite(actualLowTemp) ? Math.round(actualLowTemp) : "";
+            actualTotalPrecip = parseFloat(actualTotalPrecip.toFixed(2));
+
+            lastAnalysisData = {
+                station: currentStation,
+                date: startDate.toISOString().split('T')[0],
+                guess: { high: guessHighTemp, low: guessLowTemp, wind: guessMaxWind, precip: guessPrecip },
+                actual: { high: actualHighTemp, low: actualLowTemp, wind: 'CLI', precip: actualTotalPrecip }
+            };
+            
+            document.getElementById('res-high-temp-guess').textContent = guessHighTemp.toFixed(1);
+            const highActualCell = document.getElementById('res-high-temp-actual');
+            const highDiffCell = document.getElementById('res-high-temp-diff');
+            highActualCell.innerHTML = `<input type="number" id="actual-high-temp-input" value="${actualHighTemp}" class="analysis-input">`;
+            
+            document.getElementById('res-low-temp-guess').textContent = guessLowTemp.toFixed(1);
+            const lowActualCell = document.getElementById('res-low-temp-actual');
+            const lowDiffCell = document.getElementById('res-low-temp-diff');
+            lowActualCell.innerHTML = `<input type="number" id="actual-low-temp-input" value="${actualLowTemp}" class="analysis-input">`;
+
+            document.getElementById('res-max-wind-guess').textContent = guessMaxWind;
+            const windActualCell = document.getElementById('res-max-wind-actual');
+            const windDiffCell = document.getElementById('res-max-wind-diff');
+            windActualCell.innerHTML = `<input type="number" id="cli-wind-input" class="analysis-input" placeholder="CLI value">`;
+
+            document.getElementById('res-precip-guess').textContent = guessPrecip.toFixed(2);
+            const precipActualCell = document.getElementById('res-precip-actual');
+            const precipDiffCell = document.getElementById('res-precip-diff');
+            precipActualCell.innerHTML = `<input type="number" step="0.01" id="actual-precip-input" value="${actualTotalPrecip.toFixed(2)}" class="analysis-input">`;
+
+            function updateLiveScoreAndDiffs() {
+                const actualHigh = parseFloat(document.getElementById('actual-high-temp-input').value);
+                if (!isNaN(actualHigh)) {
+                    lastAnalysisData.actual.high = actualHigh;
+                    highDiffCell.textContent = Math.round(guessHighTemp) - actualHigh;
+                } else {
+                    lastAnalysisData.actual.high = "N/A";
+                    highDiffCell.textContent = "-";
+                }
+                
+                const actualLow = parseFloat(document.getElementById('actual-low-temp-input').value);
+                if (!isNaN(actualLow)) {
+                    lastAnalysisData.actual.low = actualLow;
+                    lowDiffCell.textContent = Math.round(guessLowTemp) - actualLow;
+                } else {
+                    lastAnalysisData.actual.low = "N/A";
+                    lowDiffCell.textContent = "-";
+                }
+                
+                const actualPrecip = parseFloat(document.getElementById('actual-precip-input').value);
+                if (!isNaN(actualPrecip)) {
+                    lastAnalysisData.actual.precip = actualPrecip;
+                    precipDiffCell.textContent = (guessPrecip - actualPrecip).toFixed(2);
+                } else {
+                    lastAnalysisData.actual.precip = "N/A";
+                    precipDiffCell.textContent = "-";
+                }
+                
+                const actualWind = parseFloat(document.getElementById('cli-wind-input').value);
+                if (!isNaN(actualWind)) {
+                    lastAnalysisData.actual.wind = actualWind;
+                    windDiffCell.textContent = Math.round(guessMaxWind) - actualWind;
+                } else {
+                    lastAnalysisData.actual.wind = 'CLI';
+                    windDiffCell.textContent = "-";
+                }
+                
+                const score = calculateDailyRawScore(lastAnalysisData);
+                liveScoreDisplay.textContent = score.toFixed(2);
+                lastAnalysisData.score = score;
+            }
+            
+            updateLiveScoreAndDiffs();
+            
+            document.getElementById('actual-high-temp-input').addEventListener('input', updateLiveScoreAndDiffs);
+            document.getElementById('actual-low-temp-input').addEventListener('input', updateLiveScoreAndDiffs);
+            document.getElementById('actual-precip-input').addEventListener('input', updateLiveScoreAndDiffs);
+            document.getElementById('cli-wind-input').addEventListener('input', updateLiveScoreAndDiffs);
+            
+            predictionResultsEl.classList.remove('hidden');
+            predictionResultsEl.classList.add('fade-in');
+            saveSuccessMsg.classList.add('hidden');
+        }
+        
+        function calculatePrecipScore(forecast, observed) {
+            let f = Math.round(forecast * 100);
+            let o = Math.round(observed * 100);
+            
+            if (f === o) return 0;
+
+            let score = 0;
+            const ranges = [
+                { limit: 10, rate: 0.4 },
+                { limit: 25, rate: 0.3 },
+                { limit: 50, rate: 0.2 },
+                { limit: Infinity, rate: 0.1 }
+            ];
+
+            let start = Math.min(f, o);
+            let end = Math.max(f, o);
+            
+            for (const range of ranges) {
+                if (start >= range.limit) continue;
+                
+                const rangeStart = start;
+                const rangeEnd = Math.min(end, range.limit);
+                
+                score += (rangeEnd - rangeStart) * range.rate;
+                
+                start = rangeEnd;
+                if (start >= end) break;
+            }
+            return score;
+        }
+
+        function calculateDailyRawScore(data) {
+            let totalScore = 0;
+
+            if (isFinite(data.actual.high) && isFinite(data.guess.high)) {
+                totalScore += Math.abs(Math.round(data.guess.high) - data.actual.high);
+            }
+             if (isFinite(data.actual.low) && isFinite(data.guess.low)) {
+                totalScore += Math.abs(Math.round(data.guess.low) - data.actual.low);
+            }
+            
+            if (isFinite(data.actual.wind) && isFinite(data.guess.wind)) {
+                totalScore += Math.abs(Math.round(data.guess.wind) - Math.round(data.actual.wind)) * 0.5;
+            }
+
+            if (isFinite(data.actual.precip) && isFinite(data.guess.precip)) {
+                 totalScore += calculatePrecipScore(data.guess.precip, data.actual.precip);
+            }
+
+            return totalScore;
+        }
+
+
+        function handleStationChange(event) {
+            event.preventDefault();
+            const newStation = stationInput.value.trim().toUpperCase();
+            if (newStation && newStation.length === 4) {
+                currentStation = newStation;
+                if (refreshInterval) clearInterval(refreshInterval);
+                fetchStationData(currentStation);
+                refreshInterval = setInterval(() => fetchStationData(currentStation), 300000);
+            } else {
+                stationErrorEl.textContent = "Please enter a valid 4-letter ICAO code.";
+                stationErrorEl.classList.remove('hidden');
+            }
+        }
+        
+        function saveJournalEntry() {
+            if (!lastAnalysisData) return;
+            
+            if (!isFinite(lastAnalysisData.actual.high) ||
+                !isFinite(lastAnalysisData.actual.low) ||
+                !isFinite(lastAnalysisData.actual.wind) ||
+                !isFinite(lastAnalysisData.actual.precip)) {
+                alert("Please ensure all 'Actual' fields have valid numbers before saving.");
+                return;
+            }
+
+            const journal = JSON.parse(localStorage.getItem('metarForecastJournal') || '[]');
+            journal.unshift(lastAnalysisData);
+            localStorage.setItem('metarForecastJournal', JSON.stringify(journal));
+            
+            displayJournal();
+            saveSuccessMsg.classList.remove('hidden');
+            setTimeout(() => saveSuccessMsg.classList.add('hidden'), 3000);
+        }
+        
+        function getColorClass(diff, green, yellow) {
+            const absDiff = Math.abs(diff);
+            if (absDiff <= green) return 'text-green-400';
+            if (absDiff <= yellow) return 'text-yellow-400';
+            return 'text-red-400';
+        }
+
+        function displayJournal() {
+            const journal = JSON.parse(localStorage.getItem('metarForecastJournal') || '[]');
+            journalTableBody.innerHTML = '';
+            
+            if (journal.length === 0) {
+                journalTableBody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-gray-400">No saved forecasts yet.</td></tr>`;
+                averageScoreEl.textContent = '-';
+                return;
+            }
+
+            let totalScore = 0;
+            journal.forEach(entry => {
+                const row = document.createElement('tr');
+                row.className = 'border-b border-gray-800 last:border-b-0 text-sm';
+
+                const highColor = getColorClass(Math.round(entry.guess.high) - entry.actual.high, 2, 5);
+                const lowColor = getColorClass(Math.round(entry.guess.low) - entry.actual.low, 2, 5);
+                const windColor = getColorClass(Math.round(entry.guess.wind) - entry.actual.wind, 3, 6);
+                const precipColor = getColorClass(entry.guess.precip - entry.actual.precip, 0.10, 0.25);
+                
+                row.innerHTML = `
+                    <td class="p-2 font-semibold">${entry.station}</td>
+                    <td class="p-2">${entry.date}</td>
+                    <td class="p-2">${Math.round(entry.guess.high)} / <span class="${highColor} font-bold">${entry.actual.high}</span></td>
+                    <td class="p-2">${Math.round(entry.guess.low)} / <span class="${lowColor} font-bold">${entry.actual.low}</span></td>
+                    <td class="p-2">${Math.round(entry.guess.wind)} / <span class="${windColor} font-bold">${Math.round(entry.actual.wind)}</span></td>
+                    <td class="p-2">${entry.guess.precip.toFixed(2)} / <span class="${precipColor} font-bold">${entry.actual.precip.toFixed(2)}</span></td>
+                    <td class="p-2 font-bold">${entry.score.toFixed(2)}</td>
+                `;
+                journalTableBody.appendChild(row);
+                totalScore += entry.score;
+            });
+
+            const avgScore = totalScore / journal.length;
+            averageScoreEl.textContent = avgScore.toFixed(2);
+        }
+
+        function handleClearJournal() {
+            if (clearJournalBtn.dataset.confirm) {
+                localStorage.removeItem('metarForecastJournal');
+                displayJournal();
+                clearJournalBtn.textContent = 'Clear Journal';
+                delete clearJournalBtn.dataset.confirm;
+            } else {
+                clearJournalBtn.textContent = 'Are you sure?';
+                clearJournalBtn.dataset.confirm = 'true';
+                setTimeout(() => {
+                    clearJournalBtn.textContent = 'Clear Journal';
+                    delete clearJournalBtn.dataset.confirm;
+                }, 3000);
+            }
+        }
+        
+        function setupTabs() {
+            const tabButtons = document.querySelectorAll('.tab-button');
+            const tabContents = document.querySelectorAll('.tab-content');
+
+            tabButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    tabButtons.forEach(btn => btn.classList.remove('active'));
+                    button.classList.add('active');
+
+                    const tab = button.dataset.tab;
+                    tabContents.forEach(content => {
+                        content.classList.remove('active');
+                        if (content.id === `tab-content-${tab}`) {
+                            content.classList.add('active');
+                        }
+                    });
+                });
+            });
+        }
+        
+        // --- Event Listeners ---
+        stationForm.addEventListener('submit', handleStationChange);
+        predictionForm.addEventListener('submit', fetchAndAnalyzeForecast);
+        showLatestBtn.addEventListener('click', () => {
+            if (latestMetarObservation) {
+                updateUI(latestMetarObservation, true);
+            }
+        });
+        saveJournalBtn.addEventListener('click', saveJournalEntry);
+        clearJournalBtn.addEventListener('click', handleClearJournal);
+        
+        // --- Initial Setup ---
+        setDefaultForecastDate();
+        fetchStationData(currentStation);
+        displayJournal();
+        setupTabs();
+        refreshInterval = setInterval(() => fetchStationData(currentStation), 300000);
+        
+        // --- PWA Service Worker Registration (Final, Corrected Version) ---
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/METAR-forecast-verification/sw.js', { scope: '/METAR-forecast-verification/' })
+                    .then(registration => {
+                        console.log('ServiceWorker registration successful with scope: ', registration.scope);
+                    }, err => {
+                        console.log('ServiceWorker registration failed: ', err);
+                    });
+            });
+        }
+    </script>
+
+</body>
+</html>
+
