@@ -2,7 +2,7 @@
   "name": "METAR Forecast Tool",
   "short_name": "METAR Tool",
   "description": "Live Weather Data from the National Weather Service",
-  "start_url": "/METAR-forecast-tool/",
+  "start_url": "/METAR-forecast-verification/",
   "display": "standalone",
   "background_color": "#111827",
   "theme_color": "#06b6d4",
@@ -19,4 +19,5 @@
     }
   ]
 }
+
 

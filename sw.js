@@ -1,10 +1,10 @@
 // This service worker file caches the main app shell (the HTML file).
 // This allows the app to load instantly on repeat visits and even load offline.
 
-const CACHE_NAME = 'metar-forecast-tool-cache-v2'; // Updated version
+const CACHE_NAME = 'metar-forecast-verification-cache-v1'; // Updated version
 const urlsToCache = [
-  '/METAR-forecast-tool/',
-  '/METAR-forecast-tool/index.html'
+  '/METAR-forecast-verification/',
+  '/METAR-forecast-verification/index.html'
 ];
 
 // Install event: This runs when the service worker is first installed.
